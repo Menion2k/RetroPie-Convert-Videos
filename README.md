@@ -1,8 +1,9 @@
 # RetroPie Convert Videos
 
-A tool for RetroPie to convert videos.
-
-**WARNING: The Raspberry Pi doesn't have that much power and converting videos is very demanding. It takes about 35 seconds to convert a video, so if you have a lot of videos... Do the math ;)**
+A tool for RetroPie to convert videos with VAAPI acceleration on a x86 HOST
+You need to modify the script and set the home variable to point to the root directory
+where the "roms" Retropie directory is present. If you have roms on the Retropie SD
+either you mount them via samba/nfs on the host or you mount directly the SD card
 
 ## Prerequisites
 
@@ -13,8 +14,8 @@ At this moment this script only works with videos downloaded using [Steven Selph
 ## Installation
 
 ```
-cd /home/pi/
-git clone https://github.com/hiulit/RetroPie-Convert-Videos.git
+cd /scriptdir
+git clone https://github.com/Menion2k/RetroPie-Convert-Videos.git
 cd RetroPie-Convert-Videos/
 sudo chmod +x retropie-convert-videos.sh
 ```
