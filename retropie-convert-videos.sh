@@ -9,33 +9,57 @@
 # License: MIT https://github.com/hiulit/RetroPie-Convert-Videos/blob/master/LICENSE
 #
 # Requirements:
-# - Retropie 4.x.x
-# - libav-tools package
+# - ffmpeg package
 
-home="$(find /home -type d -name RetroPie -print -quit 2>/dev/null)"
-home="${home%/RetroPie}"
-
+home="/media/storage/das1/emulation"
+#home="$(get_config "home")"
 readonly SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 readonly SCRIPT_TITLE="Convert videos for RetroPie."
 readonly SCRIPT_DESCRIPTION="A tool for RetroPie to convert videos."
 readonly SCRIPT_CFG="$SCRIPT_DIR/retropie-convert-videos-settings.cfg"
 
-readonly ROMS_DIR="$home/RetroPie/roms"
+readonly ROMS_DIR="$home/roms"
 readonly VIDEOS_DIR="images"
 readonly CONVERTED_VIDEOS_DIR="converted"
 
 CONFIG_FLAG=0
+
+trap ctrl_c INT
 
 function is_retropie() {
     [[ -d "$home/RetroPie" && -d "$home/.emulationstation" && -d "/opt/retropie" ]]
 }
 
 function check_dependencies() {
-    if ! which avconv > /dev/null; then
-        echo "ERROR: The libav-tools package is not installed!" >&2
-        echo "Please, install it with 'sudo apt-get install libav-tools'." >&2
+    if ! which ffmpeg > /dev/null; then
+        echo "ERROR: The ffmpeg package is not installed!" >&2
+        echo "Please, install it with 'sudo apt-get install ffmpeg'." >&2
         exit 1
     fi
+}
+
+function ctrl_c() {
+    echo
+    for result in "${results[@]}"; do
+        echo "$result"
+    done
+    echo
+    if [[ "$successfull" -gt 0 ]]; then
+        if [[ "$successfull" -gt 1 ]]; then
+            echo "$successfull videos were successfull."
+        else
+            echo "$successfull video was successfull."
+        fi
+    fi
+    if [[ "$unsuccessfull" -gt 0 ]]; then
+        if [[ "$unsuccessfull" -gt 1 ]]; then
+            echo  "$unsuccessfull videos were unsuccessfull."
+        else
+            echo  "$unsuccessfull video was unsuccessfull."
+        fi
+    fi
+
+    exit 0
 }
 
 function check_argument() {
@@ -69,7 +93,6 @@ function check_config() {
     local to_color
     from_color="$(get_config "from_color")"
     to_color="$(get_config "to_color")"
-
     if [[ -z "$to_color" ]]; then
         echo >&2
         echo "'to_color' value (mandatory) not found in '$SCRIPT_CFG'" >&2
@@ -93,7 +116,7 @@ function usage() {
 function validate_CES() {
     [[ -z "$1" ]] && return 0
 
-    if avconv -loglevel quiet -pix_fmts | grep -q -w "$1"; then
+    if ffmpeg -v quiet -pix_fmts | grep -q -w "$1"; then
         return 0
     else
         echo >&2
@@ -103,7 +126,7 @@ function validate_CES() {
             echo "Check '$SCRIPT_CFG'" >&2
             echo >&2
         fi
-        echo "TIP: run the 'avconv -pix_fmts' command to get a full list of Color Encoding Systems (C.E.S)." >&2
+        echo "TIP: run the 'ffmpeg -pix_fmts' command to get a full list of Color Encoding Systems (C.E.S)." >&2
         echo >&2
         exit 1
     fi
@@ -111,7 +134,8 @@ function validate_CES() {
 
 function convert_video() {
     mkdir -p "$rom_dir/$VIDEOS_DIR/$converted_videos_dir"
-    avconv -i "$video" -y -pix_fmt "$to_color" -strict experimental "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename "$video")"
+    #echo " ffmpeg -vaapi_device /dev/dri/renderD128 -i $video -vf 'format=nv12,hwupload' -c:v h264_vaapi -c:a copy -b:v $bitrate $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video)"
+    ffmpeg -vaapi_device /dev/dri/renderD128 -i "$video" -vf 'format=nv12,hwupload' -c:v h264_vaapi -c:a copy -b:v "$bitrate" "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename "$video")" 
     result_value="$?"
     if [[ "$result_value" -eq 0 ]]; then
         results+=("> $(basename "$video") --> Successfully converted!")
@@ -162,15 +186,30 @@ function convert_videos() {
                         from_color="$2"
                         to_color="$3"
                         converted_videos_dir="$CONVERTED_VIDEOS_DIR-$to_color"
-                        if avprobe "$video" 2>&1 | grep -q "$from_color"; then
-                            convert_video
-                        else
-                            results+=("> $(basename "$video") --> Doesn't use '$from_color' Color Encoding System (C.E.S).")
-                            ((unsuccessfull++))
-                        fi
+			if [ ! -f "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video)" ]; then
+			    #echo "ffprobe -v quiet -print_format xml -show_streams $video > $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml"
+			    ffprobe -v quiet -print_format xml -show_streams "$video" > "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename "$video").xml"
+			    #echo "xmllint --xpath 'string(/ffprobe/streams/stream/@bit_rate)' $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml"
+			    bitrate=$(/usr/bin/xmllint --xpath 'string(/ffprobe/streams/stream/@bit_rate)' $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml)
+			    pixfmt=$(/usr/bin/xmllint --xpath 'string(/ffprobe/streams/stream/@pix_fmt)' $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml) 
+                            echo "$video bitrate is $bitrate pixfmt $pixfmt"
+                            if [ "$pixfmt" == "$from_color" ]; then 
+			        convert_video
+                            else
+                                results+=("> $(basename "$video") --> Doesn't use '$from_color' Color Encoding System (C.E.S).")
+                                ((unsuccessfull++))
+                            fi
+			else
+				echo "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video) exist, skipping"
+				results+=("> $(basename "$video") --> Already presente in converted dir, skip")
+			fi
                     else
                         to_color="$2"
                         converted_videos_dir="$CONVERTED_VIDEOS_DIR-$to_color"
+			#echo "ffprobe -v quiet -print_format xml -show_streams $video > $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml"
+                        ffprobe -v quiet -print_format xml -show_streams "$video" > "$rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename "$video").xml"
+                        #echo "xmllint --xpath 'string(/ffprobe/streams/stream/@bit_rate)' $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml"
+                        bitrate=$(/usr/bin/xmllint --xpath 'string(/ffprobe/streams/stream/@bit_rate)' $rom_dir/$VIDEOS_DIR/$converted_videos_dir/$(basename $video).xml)
                         convert_video
                     fi
                 done
@@ -309,11 +348,6 @@ function get_options() {
 }
 
 function main() {
-
-    if ! is_retropie; then
-        echo "ERROR: RetroPie is not installed. Aborting ..." >&2
-        exit 1
-    fi
 
     check_dependencies
 
